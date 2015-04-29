@@ -1,19 +1,27 @@
 require 'mechanize'
 require 'timeout'
 require './errors/errors'
+require 'active_support/all'
 class Crawler
   DEFAULT_DEPTH = 2
   TIMEOUT       = 0.5
 
   def initialize(params)
     raise ArgumentError.new('The input must be a hash!') unless params.is_a?Hash
-    @params = params
+    @params = params.with_indifferent_access
     @agent  = Mechanize.new
 
   end
   def method_missing(method, *args)
-    @params[method]
+    case method 
+    when /.*=/
+      key = method.to_s.split('=')[0]
+      @params[key] = args.first
+    else
+      @params[method]
+    end
   end
+
 
   def start_crawling
     page = @agent.get(url)
