@@ -1,30 +1,41 @@
 require 'mechanize'
 require 'timeout'
-require './errors/errors'
+require "#{File.dirname(__FILE__)}/errors/errors"
+require "#{File.dirname(__FILE__)}/configuration"
+require "#{File.dirname(__FILE__)}/middleware/crawler_middleware"
 require 'active_support/all'
+require '../middlewares/weibo_login'
 class Crawler
   DEFAULT_DEPTH = 2
   TIMEOUT       = 0.5
 
   def initialize(params)
     raise ArgumentError.new('The input must be a hash!') unless params.is_a?Hash
-    @params = params.with_indifferent_access
+    @params = params.dup.with_indifferent_access
+    @middle_wares = []
     @agent  = Mechanize.new
-
+    @params[:agent] = @agent unless @params[:agent]
   end
+
   def method_missing(method, *args)
     case method 
-    when /.*=/
-      key = method.to_s.split('=')[0]
-      @params[key] = args.first
-    else
-      @params[method]
+      when /.*=/
+        key, _       = method.to_s.split('=')
+        @params[key] = args[0]
+      else @params[method]
     end
   end
 
-
   def start_crawling
-    page = @agent.get(url)
+    if url
+      page = @agent.get(url)
+    else
+      @middle_wares.each do |mw|
+        mw.call(@params)
+      end
+      page = @params[:page]
+    end
+
     process(page, 0)
   end
 
@@ -39,7 +50,7 @@ class Crawler
         process(sub_page, depth + 1)
         sleep(0.2)
       rescue Mechanize::UnsupportedSchemeError => _
-        $stderr.puts "Error: Found link with unsupported scheme, trying another"
+        $stderr.puts 'Error: Found link with unsupported scheme, trying another'
       rescue Mechanize::ResponseCodeError => err
         $stderr.puts "Error: #{err.message}"
       rescue TimeoutError => err
@@ -70,15 +81,18 @@ puts 'succeeded!'
 end
 
 if __FILE__ == $0
-  url   = nil
-  depth = nil
   case ARGV.size
-  when 1, 2
-    url   = ARGV[0]
-    depth = ARGV[1]
-  else
-    raise ArgumentError.new('The size of arguments should either be 1 or 2')
+    when 2, 3
+      username = ARGV[0]
+      password = ARGV[1]
+      depth    = ARGV[2]
+    else
+      raise ArgumentError.new('The size of arguments should either be 1 or 2')
   end
-  crawler = Crawler.new(:url => url, :crawling_depth => depth)
+  crawler = Crawler.new(:crawling_depth => depth)
+  crawler.configuration do |cr|
+    cr.register WeiboLogin, :username => username, :password => password
+  end
+
   crawler.start_crawling
 end
